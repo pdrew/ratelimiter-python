@@ -9,7 +9,7 @@ class RateLimit:
 
 class RateLimitExceeded(HTTPException):
     def __init__(self, detail="Rate limit exceeded"):
-        super().__init__(status=429, detail=detail)
+        super().__init__(status_code=429, detail=detail)
 
 class TokenBucket(RateLimit):
     def __init__(self):
@@ -34,3 +34,43 @@ class TokenBucket(RateLimit):
                 return True
             else:
                 raise RateLimitExceeded()
+            
+class FixedCounterWindow(RateLimit):
+    def __init__(self):
+        super().__init__()
+        self.counter = 0
+        self.curr_time = datetime.now().time().replace(second=0, microsecond=0)
+        self.lock = threading.Lock()
+
+    def allow_request(self):
+        with self.lock:
+            curr = datetime.now().time().replace(second=0, microsecond=0)
+
+            if curr != self.curr_time:
+                self.curr_time = curr
+                self.counter = 0
+            
+            if self.counter >= self.limit_per_interval:
+                raise RateLimitExceeded()
+            self.counter += 1
+            return True
+        
+class SlidingWindow(RateLimit):
+    def __init__(self):
+        super().__init__()
+        self.logs = []
+        self.lock = threading.Lock()
+
+    def allow_request(self):
+        with self.lock:
+            curr = datetime.now()
+
+            while len(self.logs) > 0 and (curr - self.logs[0]).total_seconds() > self.interval:
+                self.logs.pop(0)
+            
+            if len(self.logs) >= self.limit_per_interval:
+                raise RateLimitExceeded()
+            
+            self.logs.append(curr)
+
+            return True
